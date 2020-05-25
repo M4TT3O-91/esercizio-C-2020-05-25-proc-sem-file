@@ -54,7 +54,7 @@ sem_t *mutex;
 
 int create_file_set_size(char *file_name, unsigned int file_size);
 void soluzione_A();
-void read_write_in_file(int *fd, int i);
+void read_write_in_file(int *fd, int i ,int eof);
 
 #define CHECK_ERR(a,msg) {if ((a) == -1) { perror((msg)); exit(EXIT_FAILURE); } }
 #define CHECK_ERR_MMAP(a,msg) {if ((a) == MAP_FAILED) { perror((msg)); exit(EXIT_FAILURE); } }
@@ -98,23 +98,30 @@ void soluzione_A() {
 	int fd = create_file_set_size(file_name, file_size);
 
 	pid_t pid;
-	int j = 0;
+
+
+	int eof = lseek(fd, 0, SEEK_END);
+	CHECK_ERR(eof, "Lseek error")
+
+	int res = lseek(fd, 0, SEEK_SET);
+	CHECK_ERR(res, "Lseek error")
 
 	for (int i = 0; i < N; i++) {
 		pid = fork();
 		switch (pid) {
 		case 0:
+			while (1) {
 
-			while (j < FILE_SIZE) {
 				if (sem_wait(proc_sem) == -1) {
 					perror("sem_wait");
 					exit(EXIT_FAILURE);
 				}
-				read_write_in_file(&fd, i);
-				j++;
+				res = lseek(fd, 0, SEEK_CUR);
+				CHECK_ERR(res, "Lseek error")
+
+				read_write_in_file(&fd, i,eof);
 			}
-			printf("[CHILD] numero %d EXIT_SUCCESS\n", i);
-			exit(EXIT_SUCCESS);
+			break;
 		case -1:
 			perror("fork()");
 			exit(EXIT_FAILURE);
@@ -128,9 +135,9 @@ void soluzione_A() {
 			exit(EXIT_FAILURE);
 		}
 	}
-	do {
-		j = wait(NULL);
-	} while (j != 0);
+
+	for (int j = 0; j < N; j++)
+		wait(NULL);
 
 	printf("Processo completato BYE!\n");
 	return;
@@ -153,32 +160,34 @@ int create_file_set_size(char *file_name, unsigned int file_size) {
 	return fd;
 }
 
-void read_write_in_file(int *fd, int i) {
+void read_write_in_file(int *fd, int i, int eof) {
 
 	char append_message = 'A' + (char) i;
-	char *tmp;
+	char *tmp = malloc(2);
 	int res;
-
-	tmp = malloc(FILE_SIZE);
+	int curr;
 
 	if (sem_wait(mutex) == -1) {
 		perror("sem_wait");
 		exit(EXIT_FAILURE);
 	}
-	while ((res = read(*fd, tmp, 1)) > 0) {
-		CHECK_ERR(res, "Read error");
-	}
 
-	for (int k = 0; k < FILE_SIZE; k++) {
-		if (tmp[k] == 0) {
-			if ((lseek(*fd, k, SEEK_SET)) == -1) {
-				perror("lseek()");
+	res = read(*fd, tmp, 1);
+	CHECK_ERR(res, "Read error in TMP");
+
+	if (tmp == 0) {
+		curr = lseek(*fd, 0, SEEK_CUR);
+		CHECK_ERR(res, "Lseek");
+		if (curr == eof) {
+			if (sem_post(mutex) == -1) {
+				perror("sem_post");
 				exit(EXIT_FAILURE);
 			}
-			printf("CHILD %d scrive a offset %d\n", i, k);
-			res = write(*fd, &append_message, sizeof(append_message));
-			CHECK_ERR(res, "Write error")
+			exit(EXIT_SUCCESS);
 		}
+		printf("CHILD %d scrive a offset %d\n", i, res);
+		res = write(*fd, &append_message, sizeof(append_message));
+		CHECK_ERR(res, "Write error")
 	}
 
 	if (sem_post(mutex) == -1) {
@@ -186,6 +195,5 @@ void read_write_in_file(int *fd, int i) {
 		exit(EXIT_FAILURE);
 	}
 
-	free(tmp);
 	return;
 }
