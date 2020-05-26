@@ -46,25 +46,58 @@
 #include <semaphore.h>
 
 //#define FILE_SIZE (1024*1024)
-#define FILE_SIZE (10)
+#define FILE_SIZE (1000)
 #define N 4
 
 sem_t *proc_sem;
 sem_t *mutex;
 
-//int create_file_set_size(char *file_name, unsigned int file_size);
-//void soluzione_A();
-//void read_write_in_file(int fd, int i);
+int create_file_set_size(char *file_name, unsigned int file_size);
+void soluzione_A();
+void soluzione_B();
+void read_write_in_file(int fd, int i);
 
 #define CHECK_ERR(a,msg) {if ((a) == -1) { perror((msg)); exit(EXIT_FAILURE); } }
 #define CHECK_ERR_MMAP(a,msg) {if ((a) == MAP_FAILED) { perror((msg)); exit(EXIT_FAILURE); } }
+
+/******************************************************************************************/
+int main(int argc, char *argv[]) {
+	proc_sem = mmap(NULL, // NULL: è il kernel a scegliere l'indirizzo
+			sizeof(sem_t) * 2, // dimensione della memory map
+			PROT_READ | PROT_WRITE, // memory map leggibile e scrivibile
+			MAP_SHARED | MAP_ANONYMOUS, // memory map condivisibile con altri processi e senza file di appoggio
+			-1, 0); // offset nel file
+	CHECK_ERR_MMAP(proc_sem, "mmap")
+
+	mutex = proc_sem + 1;
+
+	printf("ora avvio la soluzione_A()...\n");
+	//soluzione_A();
+
+	printf("ed ora avvio la soluzione_B()...\n");
+	soluzione_B();
+
+	printf("bye!\n");
+	return 0;
+}
 
 void soluzione_A() {
 //	usare le system call open(), lseek(), write()
 	char *file_name = "output_A.txt";
 	unsigned int file_size = FILE_SIZE;
 	int fd = create_file_set_size(file_name, file_size);
+	int res;
 	pid_t pid;
+
+	res = sem_init(proc_sem, 1, // 1 => il semaforo è condiviso tra processi, 0 => il semaforo è condiviso tra threads del processo
+			0 // valore iniziale del semaforo
+			);
+	CHECK_ERR(res, "Sem init")
+
+	res = sem_init(mutex, 1, // 1 => il semaforo è condiviso tra processi, 0 => il semaforo è condiviso tra threads del processo
+			1 // valore iniziale del semaforo (se mettiamo 0 che succede?)
+			);
+	CHECK_ERR(res, "Mutex init")
 
 	for (int i = 0; i < N; i++) {
 		pid = fork();
@@ -100,13 +133,13 @@ void soluzione_A() {
 }
 
 void soluzione_B() {
-//	usare le system call open(), lseek(), write()
+//	usare le system call open(), mmap()
 	char *file_name = "output_B.txt";
 	unsigned int file_size = FILE_SIZE;
-	int file_map;
+	char *file_map;
 	int res;
+	int index = 0;
 	int fd = create_file_set_size(file_name, file_size);
-	char append_message;
 
 	pid_t pid;
 
@@ -119,12 +152,21 @@ void soluzione_B() {
 	CHECK_ERR_MMAP(file_map, "file mapping error");
 	close(fd);
 
+	res = sem_init(proc_sem, 1, // 1 => il semaforo è condiviso tra processi, 0 => il semaforo è condiviso tra threads del processo
+			0 // valore iniziale del semaforo
+			);
+	CHECK_ERR(res, "Sem init")
+
+	res = sem_init(mutex, 1, // 1 => il semaforo è condiviso tra processi, 0 => il semaforo è condiviso tra threads del processo
+			1 // valore iniziale del semaforo (se mettiamo 0 che succede?)
+			);
+	CHECK_ERR(res, "Mutex init")
+
 	for (int i = 0; i < N; i++) {
 		pid = fork();
 		switch (pid) {
 		case 0:
-			append_message = 'A' + (char) i;
-			for (int j = 0; j < FILE_SIZE; j++) {
+			while (1) {
 				if (sem_wait(proc_sem) == -1) {
 					perror("sem_wait");
 					exit(EXIT_FAILURE);
@@ -134,15 +176,24 @@ void soluzione_B() {
 					perror("sem_wait");
 					exit(EXIT_FAILURE);
 				}
-				if (file_map[j] == 0) {
-					printf("CHILD %d scrive in posizione %d\n", i);
-					res = write(fd, &append_message, sizeof(append_message));
-					CHECK_ERR(res, "Write error")
 
-					if (sem_post(mutex) == -1) {
-						perror("sem_post");
-						exit(EXIT_FAILURE);
+				while (file_map[index] != 0) {
+					if (index == FILE_SIZE) {
+						if (sem_post(mutex) == -1) {
+							perror("sem_post");
+							exit(EXIT_FAILURE);
+						}
+						printf("CHILD numero %d EXIT_SUCCESS\n", i);
+						exit(EXIT_SUCCESS);
 					}
+					index++;
+				}
+				printf("CHILD %d scrive in posizione %d \n", i, index);
+				file_map[index] = 'A' + (char) i;
+
+				if (sem_post(mutex) == -1) {
+					perror("sem_post");
+					exit(EXIT_FAILURE);
 				}
 			}
 			break;
@@ -187,7 +238,6 @@ void read_write_in_file(int fd, int i) {
 	char append_message = 'A' + (char) i;
 	char tmp;
 	int res;
-	int curr;
 
 	if (sem_wait(mutex) == -1) {
 		perror("sem_wait");
@@ -217,38 +267,5 @@ void read_write_in_file(int fd, int i) {
 	}
 
 	return;
-}
-
-/******************************************************************************************/
-int main(int argc, char *argv[]) {
-
-	int res;
-
-	proc_sem = mmap(NULL, // NULL: è il kernel a scegliere l'indirizzo
-			sizeof(sem_t) * 2, // dimensione della memory map
-			PROT_READ | PROT_WRITE, // memory map leggibile e scrivibile
-			MAP_SHARED | MAP_ANONYMOUS, // memory map condivisibile con altri processi e senza file di appoggio
-			-1, 0); // offset nel file
-	CHECK_ERR_MMAP(proc_sem, "mmap")
-
-	mutex = proc_sem + 1;
-	res = sem_init(proc_sem, 1, // 1 => il semaforo è condiviso tra processi, 0 => il semaforo è condiviso tra threads del processo
-			0 // valore iniziale del semaforo
-			);
-	CHECK_ERR(res, "Sem init")
-
-	res = sem_init(mutex, 1, // 1 => il semaforo è condiviso tra processi, 0 => il semaforo è condiviso tra threads del processo
-			1 // valore iniziale del semaforo (se mettiamo 0 che succede?)
-			);
-	CHECK_ERR(res, "Mutex init")
-
-	printf("ora avvio la soluzione_A()...\n");
-	soluzione_A();
-
-	printf("ed ora avvio la soluzione_B()...\n");
-	soluzione_B();
-
-	printf("bye!\n");
-	return 0;
 }
 
