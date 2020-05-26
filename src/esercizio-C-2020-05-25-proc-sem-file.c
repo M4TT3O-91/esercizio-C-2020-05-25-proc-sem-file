@@ -46,7 +46,7 @@
 #include <semaphore.h>
 
 //#define FILE_SIZE (1024*1024)
-#define FILE_SIZE (1000)
+#define FILE_SIZE (100)
 #define N 4
 
 sem_t *proc_sem;
@@ -128,7 +128,7 @@ void soluzione_A() {
 	for (int j = 0; j < N; j++)
 		wait(NULL);
 
-	printf("Processo completato BYE!\n");
+	printf("Processo A completato BYE!\n");
 	return;
 }
 
@@ -178,17 +178,18 @@ void soluzione_B() {
 				}
 
 				while (file_map[index] != 0) {
+					index++;
 					if (index == FILE_SIZE) {
 						if (sem_post(mutex) == -1) {
 							perror("sem_post");
 							exit(EXIT_FAILURE);
 						}
-						printf("CHILD numero %d EXIT_SUCCESS\n", i);
+						//printf("CHILD numero %d EXIT_SUCCESS\n", i);
 						exit(EXIT_SUCCESS);
 					}
-					index++;
+
 				}
-				printf("CHILD %d scrive in posizione %d \n", i, index);
+				//printf("CHILD %d scrive in posizione %d \n", i, index+1);
 				file_map[index] = 'A' + (char) i;
 
 				if (sem_post(mutex) == -1) {
@@ -214,7 +215,7 @@ void soluzione_B() {
 	for (int j = 0; j < N; j++)
 		wait(NULL);
 
-	printf("Processo completato BYE!\n");
+	printf("Processo B completato BYE!\n");
 	return;
 }
 
@@ -251,7 +252,7 @@ void read_write_in_file(int fd, int i) {
 			perror("sem_post");
 			exit(EXIT_FAILURE);
 		}
-		printf("CHILD numero %d EXIT_SUCCESS\n", i);
+		//printf("CHILD numero %d EXIT_SUCCESS\n", i);
 		exit(EXIT_SUCCESS);
 	}
 	res = lseek(fd, -1, SEEK_CUR);
